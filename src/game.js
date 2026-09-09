@@ -6,12 +6,38 @@ class GameScene extends Phaser.Scene {
     this.lastPunchAt = 0;
   }
 
+  createPixelTexture(key, width, height, color) {
+    if (this.textures.exists(key)) return;
+
+    const graphics = this.add.graphics();
+    graphics.fillStyle(color, 1);
+    graphics.fillRect(0, 0, width, height);
+    graphics.generateTexture(key, width, height);
+    graphics.destroy();
+  }
+
   create() {
-    this.cameras.main.setBackgroundColor('#1b1b2f');
+    this.createPixelTexture('player', 18, 30, 0xffd166);
+    this.createPixelTexture('enemy', 18, 28, 0xef476f);
+    this.createPixelTexture('platform', 16, 16, 0x6c757d);
+    this.createPixelTexture('bullet', 6, 3, 0x06d6a0);
+
+    this.cameras.main.setBackgroundColor('#182033');
     this.physics.world.setBounds(0, 0, 2400, 216);
 
-    this.add.rectangle(1200, 108, 2400, 216, 0x1b1b2f).setScrollFactor(0);
-    this.add.rectangle(1200, 188, 2400, 56, 0x3a3a4f);
+    // Simple parallax-like background shapes so the prototype is visibly alive.
+    this.add.rectangle(192, 108, 384, 216, 0x182033)
+      .setScrollFactor(0)
+      .setDepth(-20);
+    this.add.rectangle(192, 168, 384, 96, 0x232c45)
+      .setScrollFactor(0)
+      .setDepth(-19);
+
+    for (let x = 40; x < 2400; x += 120) {
+      const h = 25 + ((x / 40) % 4) * 9;
+      this.add.rectangle(x, 185 - h / 2, 65, h, 0x2f3b59)
+        .setDepth(-10);
+    }
 
     this.platforms = this.physics.add.staticGroup();
     this.makePlatform(1200, 204, 2400, 24);
@@ -21,13 +47,10 @@ class GameScene extends Phaser.Scene {
     this.makePlatform(1530, 145, 160, 16);
     this.makePlatform(1900, 120, 180, 16);
 
-    this.player = this.physics.add.sprite(120, 150, null);
-    this.player.setSize(18, 30);
-    this.player.setDisplaySize(18, 30);
+    this.player = this.physics.add.sprite(120, 150, 'player');
     this.player.setCollideWorldBounds(true);
     this.player.setBounce(0);
     this.player.body.setGravityY(900);
-    this.player.setTint(0xffd166);
 
     this.physics.add.collider(this.player, this.platforms);
 
@@ -35,11 +58,8 @@ class GameScene extends Phaser.Scene {
     this.enemies = this.physics.add.group();
 
     [520, 880, 1320, 1680, 2140].forEach((x, i) => {
-      const enemy = this.enemies.create(x, 160 - (i % 2) * 20, null);
-      enemy.setSize(18, 28);
-      enemy.setDisplaySize(18, 28);
+      const enemy = this.enemies.create(x, 150 - (i % 2) * 18, 'enemy');
       enemy.body.setGravityY(900);
-      enemy.setTint(0xef476f);
       enemy.hp = 3;
       enemy.setVelocityX(i % 2 === 0 ? -25 : 25);
     });
@@ -60,18 +80,29 @@ class GameScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
     this.cameras.main.setDeadzone(150, 70);
 
-    this.add.text(8, 8, 'A/D Move   Space Jump   J Punch   K Shoot   W+K Shoot Up', {
+    this.add.text(8, 8, 'PHASER RUN & GUN PROTOTYPE', {
       fontFamily: 'monospace',
-      fontSize: '10px',
+      fontSize: '11px',
+      color: '#ffd166'
+    }).setScrollFactor(0).setDepth(20);
+
+    this.add.text(8, 23, 'A/D move  SPACE jump  J punch  K shoot  W+K up', {
+      fontFamily: 'monospace',
+      fontSize: '9px',
       color: '#ffffff'
-    }).setScrollFactor(0).setDepth(10);
+    }).setScrollFactor(0).setDepth(20);
+
+    this.add.text(8, 204, 'Prototype v0.2', {
+      fontFamily: 'monospace',
+      fontSize: '8px',
+      color: '#8fa3c7'
+    }).setScrollFactor(0).setDepth(20).setOrigin(0, 1);
   }
 
   makePlatform(x, y, width, height) {
-    const platform = this.platforms.create(x, y, null);
+    const platform = this.platforms.create(x, y, 'platform');
     platform.setDisplaySize(width, height);
     platform.refreshBody();
-    platform.setTint(0x6c757d);
     return platform;
   }
 
@@ -82,9 +113,11 @@ class GameScene extends Phaser.Scene {
     if (this.keys.left.isDown) {
       this.player.setVelocityX(-speed);
       this.facing = -1;
+      this.player.setFlipX(true);
     } else if (this.keys.right.isDown) {
       this.player.setVelocityX(speed);
       this.facing = 1;
+      this.player.setFlipX(false);
     } else {
       this.player.setVelocityX(0);
     }
@@ -118,32 +151,43 @@ class GameScene extends Phaser.Scene {
   }
 
   shoot(upward) {
-    const bullet = this.bullets.create(this.player.x + this.facing * 14, this.player.y - 4, null);
-    bullet.setDisplaySize(6, 3);
-    bullet.setSize(6, 3);
-    bullet.setTint(0x06d6a0);
+    const bullet = this.bullets.create(
+      this.player.x + this.facing * 14,
+      this.player.y - 4,
+      'bullet'
+    );
     bullet.body.allowGravity = false;
 
     if (upward) {
       bullet.setPosition(this.player.x, this.player.y - 20);
       bullet.setVelocity(0, -300);
     } else {
-      bullet.setVelocityX(this.facing * 360);
+      bullet.setVelocity(this.facing * 360, 0);
     }
   }
 
   punch() {
-    const hitbox = this.add.rectangle(this.player.x + this.facing * 18, this.player.y, 24, 26, 0xffffff, 0.18);
+    const hitbox = this.add.rectangle(
+      this.player.x + this.facing * 18,
+      this.player.y,
+      24,
+      26,
+      0xffffff,
+      0.22
+    );
+
     this.physics.add.existing(hitbox);
     hitbox.body.allowGravity = false;
 
     let spent = false;
-    const overlap = this.physics.add.overlap(hitbox, this.enemies, (_h, enemy) => {
+    const overlap = this.physics.add.overlap(hitbox, this.enemies, (_hitbox, enemy) => {
       if (spent || !enemy.active) return;
       spent = true;
       enemy.hp -= 2;
-      enemy.setTintFill(0xffffff);
-      this.time.delayedCall(60, () => enemy.active && enemy.clearTint());
+      enemy.setTint(0xffffff);
+      this.time.delayedCall(70, () => {
+        if (enemy.active) enemy.clearTint();
+      });
       if (enemy.hp <= 0) enemy.destroy();
     });
 
@@ -156,8 +200,10 @@ class GameScene extends Phaser.Scene {
   onBulletHit(bullet, enemy) {
     bullet.destroy();
     enemy.hp -= 1;
-    enemy.setTintFill(0xffffff);
-    this.time.delayedCall(60, () => enemy.active && enemy.clearTint());
+    enemy.setTint(0xffffff);
+    this.time.delayedCall(70, () => {
+      if (enemy.active) enemy.clearTint();
+    });
     if (enemy.hp <= 0) enemy.destroy();
   }
 }
@@ -167,7 +213,12 @@ const config = {
   parent: 'game',
   width: 384,
   height: 216,
+  backgroundColor: '#182033',
   pixelArt: true,
+  render: {
+    antialias: false,
+    roundPixels: true
+  },
   physics: {
     default: 'arcade',
     arcade: {
@@ -177,7 +228,9 @@ const config = {
   },
   scale: {
     mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: 384,
+    height: 216
   },
   scene: GameScene
 };
