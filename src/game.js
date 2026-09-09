@@ -4,68 +4,66 @@ class GameScene extends Phaser.Scene {
     this.facing = 1;
     this.lastShotAt = 0;
     this.lastPunchAt = 0;
-  }
-
-  createPixelTexture(key, width, height, color) {
-    if (this.textures.exists(key)) return;
-
-    const graphics = this.add.graphics();
-    graphics.fillStyle(color, 1);
-    graphics.fillRect(0, 0, width, height);
-    graphics.generateTexture(key, width, height);
-    graphics.destroy();
+    this.worldWidth = 2400;
+    this.gravity = 900;
   }
 
   create() {
-    this.createPixelTexture('player', 18, 30, 0xffd166);
-    this.createPixelTexture('enemy', 18, 28, 0xef476f);
-    this.createPixelTexture('platform', 16, 16, 0x6c757d);
-    this.createPixelTexture('bullet', 6, 3, 0x06d6a0);
-
     this.cameras.main.setBackgroundColor('#182033');
-    this.physics.world.setBounds(0, 0, 2400, 216);
+    this.cameras.main.setBounds(0, 0, this.worldWidth, 216);
 
-    // Simple parallax-like background shapes so the prototype is visibly alive.
-    this.add.rectangle(192, 108, 384, 216, 0x182033)
-      .setScrollFactor(0)
-      .setDepth(-20);
-    this.add.rectangle(192, 168, 384, 96, 0x232c45)
-      .setScrollFactor(0)
-      .setDepth(-19);
+    // Background
+    this.add.rectangle(1200, 108, 2400, 216, 0x182033).setDepth(-30);
+    this.add.rectangle(1200, 174, 2400, 84, 0x232c45).setDepth(-25);
 
-    for (let x = 40; x < 2400; x += 120) {
-      const h = 25 + ((x / 40) % 4) * 9;
-      this.add.rectangle(x, 185 - h / 2, 65, h, 0x2f3b59)
-        .setDepth(-10);
+    for (let x = 40; x < this.worldWidth; x += 110) {
+      const h = 24 + ((x / 110) % 4) * 10;
+      this.add.rectangle(x, 188 - h / 2, 62, h, 0x2f3b59).setDepth(-20);
     }
 
-    this.platforms = this.physics.add.staticGroup();
-    this.makePlatform(1200, 204, 2400, 24);
-    this.makePlatform(420, 158, 140, 16);
-    this.makePlatform(760, 136, 140, 16);
-    this.makePlatform(1120, 166, 180, 16);
-    this.makePlatform(1530, 145, 160, 16);
-    this.makePlatform(1900, 120, 180, 16);
+    // Platforms are simple rectangles with manual collision.
+    this.platforms = [
+      { x: 1200, y: 204, w: 2400, h: 24 },
+      { x: 420, y: 158, w: 140, h: 16 },
+      { x: 760, y: 136, w: 140, h: 16 },
+      { x: 1120, y: 166, w: 180, h: 16 },
+      { x: 1530, y: 145, w: 160, h: 16 },
+      { x: 1900, y: 120, w: 180, h: 16 }
+    ];
 
-    this.player = this.physics.add.sprite(120, 150, 'player');
-    this.player.setCollideWorldBounds(true);
-    this.player.setBounce(0);
-    this.player.body.setGravityY(900);
-
-    this.physics.add.collider(this.player, this.platforms);
-
-    this.bullets = this.physics.add.group({ allowGravity: false });
-    this.enemies = this.physics.add.group();
-
-    [520, 880, 1320, 1680, 2140].forEach((x, i) => {
-      const enemy = this.enemies.create(x, 150 - (i % 2) * 18, 'enemy');
-      enemy.body.setGravityY(900);
-      enemy.hp = 3;
-      enemy.setVelocityX(i % 2 === 0 ? -25 : 25);
+    this.platforms.forEach(p => {
+      this.add.rectangle(p.x, p.y, p.w, p.h, 0x6c757d);
+      p.left = p.x - p.w / 2;
+      p.right = p.x + p.w / 2;
+      p.top = p.y - p.h / 2;
+      p.bottom = p.y + p.h / 2;
     });
 
-    this.physics.add.collider(this.enemies, this.platforms);
-    this.physics.add.overlap(this.bullets, this.enemies, this.onBulletHit, null, this);
+    this.player = {
+      x: 120,
+      y: 150,
+      w: 18,
+      h: 30,
+      vx: 0,
+      vy: 0,
+      grounded: false,
+      view: this.add.rectangle(120, 150, 18, 30, 0xffd166)
+    };
+
+    this.enemies = [520, 880, 1320, 1680, 2140].map((x, i) => ({
+      x,
+      y: 150 - (i % 2) * 18,
+      w: 18,
+      h: 28,
+      vx: i % 2 === 0 ? -25 : 25,
+      vy: 0,
+      hp: 3,
+      alive: true,
+      view: this.add.rectangle(x, 150 - (i % 2) * 18, 18, 28, 0xef476f)
+    }));
+
+    this.bullets = [];
+    this.punchFlash = null;
 
     this.keys = this.input.keyboard.addKeys({
       left: Phaser.Input.Keyboard.KeyCodes.A,
@@ -76,54 +74,48 @@ class GameScene extends Phaser.Scene {
       shoot: Phaser.Input.Keyboard.KeyCodes.K
     });
 
-    this.cameras.main.setBounds(0, 0, 2400, 216);
-    this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
-    this.cameras.main.setDeadzone(150, 70);
-
-    this.add.text(8, 8, 'PHASER RUN & GUN PROTOTYPE', {
+    this.titleText = this.add.text(8, 8, 'PHASER RUN & GUN PROTOTYPE', {
       fontFamily: 'monospace',
       fontSize: '11px',
       color: '#ffd166'
-    }).setScrollFactor(0).setDepth(20);
+    }).setScrollFactor(0).setDepth(50);
 
     this.add.text(8, 23, 'A/D move  SPACE jump  J punch  K shoot  W+K up', {
       fontFamily: 'monospace',
       fontSize: '9px',
       color: '#ffffff'
-    }).setScrollFactor(0).setDepth(20);
+    }).setScrollFactor(0).setDepth(50);
 
-    this.add.text(8, 204, 'Prototype v0.2', {
+    this.add.text(8, 204, 'Prototype v0.3', {
       fontFamily: 'monospace',
       fontSize: '8px',
       color: '#8fa3c7'
-    }).setScrollFactor(0).setDepth(20).setOrigin(0, 1);
+    }).setOrigin(0, 1).setScrollFactor(0).setDepth(50);
+
+    this.add.text(300, 8, 'LIVE', {
+      fontFamily: 'monospace',
+      fontSize: '9px',
+      color: '#06d6a0'
+    }).setScrollFactor(0).setDepth(50);
   }
 
-  makePlatform(x, y, width, height) {
-    const platform = this.platforms.create(x, y, 'platform');
-    platform.setDisplaySize(width, height);
-    platform.refreshBody();
-    return platform;
-  }
-
-  update(time) {
+  update(time, delta) {
+    const dt = Math.min(delta / 1000, 0.033);
     const speed = 120;
-    const grounded = this.player.body.blocked.down || this.player.body.touching.down;
 
     if (this.keys.left.isDown) {
-      this.player.setVelocityX(-speed);
+      this.player.vx = -speed;
       this.facing = -1;
-      this.player.setFlipX(true);
     } else if (this.keys.right.isDown) {
-      this.player.setVelocityX(speed);
+      this.player.vx = speed;
       this.facing = 1;
-      this.player.setFlipX(false);
     } else {
-      this.player.setVelocityX(0);
+      this.player.vx = 0;
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.keys.jump) && grounded) {
-      this.player.setVelocityY(-340);
+    if (Phaser.Input.Keyboard.JustDown(this.keys.jump) && this.player.grounded) {
+      this.player.vy = -340;
+      this.player.grounded = false;
     }
 
     if (Phaser.Input.Keyboard.JustDown(this.keys.punch) && time - this.lastPunchAt > 250) {
@@ -136,75 +128,143 @@ class GameScene extends Phaser.Scene {
       this.shoot(this.keys.up.isDown);
     }
 
-    this.enemies.children.iterate(enemy => {
-      if (!enemy || !enemy.active) return;
-      if (enemy.body.blocked.left) enemy.setVelocityX(25);
-      if (enemy.body.blocked.right) enemy.setVelocityX(-25);
+    this.moveActor(this.player, dt, true);
+
+    this.enemies.forEach(enemy => {
+      if (!enemy.alive) return;
+      this.moveActor(enemy, dt, false);
+      if (enemy.x < 20 || enemy.x > this.worldWidth - 20) enemy.vx *= -1;
+      enemy.view.setPosition(enemy.x, enemy.y);
     });
 
-    this.bullets.children.iterate(bullet => {
-      if (!bullet || !bullet.active) return;
-      if (bullet.x < 0 || bullet.x > 2400 || bullet.y < 0 || bullet.y > 216) {
-        bullet.destroy();
+    this.updateBullets(dt);
+
+    this.player.view.setPosition(this.player.x, this.player.y);
+    this.player.view.setScale(this.facing, 1);
+
+    const targetScroll = Phaser.Math.Clamp(this.player.x - 150, 0, this.worldWidth - 384);
+    this.cameras.main.scrollX += (targetScroll - this.cameras.main.scrollX) * 0.12;
+  }
+
+  moveActor(actor, dt, isPlayer) {
+    const previousY = actor.y;
+
+    actor.vy += this.gravity * dt;
+    actor.x += actor.vx * dt;
+    actor.y += actor.vy * dt;
+
+    actor.x = Phaser.Math.Clamp(actor.x, actor.w / 2, this.worldWidth - actor.w / 2);
+    actor.grounded = false;
+
+    const prevBottom = previousY + actor.h / 2;
+    const nextBottom = actor.y + actor.h / 2;
+    const left = actor.x - actor.w / 2;
+    const right = actor.x + actor.w / 2;
+
+    for (const p of this.platforms) {
+      const horizontal = right > p.left && left < p.right;
+      const crossedTop = prevBottom <= p.top + 2 && nextBottom >= p.top;
+
+      if (horizontal && crossedTop && actor.vy >= 0) {
+        actor.y = p.top - actor.h / 2;
+        actor.vy = 0;
+        actor.grounded = true;
+        break;
       }
-    });
+    }
+
+    if (actor.y > 260) {
+      actor.y = 120;
+      actor.vy = 0;
+      if (!isPlayer) actor.x = Phaser.Math.Clamp(actor.x, 30, this.worldWidth - 30);
+    }
   }
 
   shoot(upward) {
-    const bullet = this.bullets.create(
-      this.player.x + this.facing * 14,
-      this.player.y - 4,
-      'bullet'
-    );
-    bullet.body.allowGravity = false;
+    const bullet = {
+      x: upward ? this.player.x : this.player.x + this.facing * 16,
+      y: upward ? this.player.y - 20 : this.player.y - 4,
+      vx: upward ? 0 : this.facing * 360,
+      vy: upward ? -300 : 0,
+      w: upward ? 3 : 6,
+      h: upward ? 6 : 3,
+      view: null
+    };
 
-    if (upward) {
-      bullet.setPosition(this.player.x, this.player.y - 20);
-      bullet.setVelocity(0, -300);
-    } else {
-      bullet.setVelocity(this.facing * 360, 0);
+    bullet.view = this.add.rectangle(bullet.x, bullet.y, bullet.w, bullet.h, 0x06d6a0);
+    this.bullets.push(bullet);
+  }
+
+  updateBullets(dt) {
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const bullet = this.bullets[i];
+      bullet.x += bullet.vx * dt;
+      bullet.y += bullet.vy * dt;
+      bullet.view.setPosition(bullet.x, bullet.y);
+
+      let remove = bullet.x < 0 || bullet.x > this.worldWidth || bullet.y < 0 || bullet.y > 216;
+
+      if (!remove) {
+        for (const enemy of this.enemies) {
+          if (!enemy.alive) continue;
+          if (this.overlap(bullet, enemy)) {
+            this.damageEnemy(enemy, 1);
+            remove = true;
+            break;
+          }
+        }
+      }
+
+      if (remove) {
+        bullet.view.destroy();
+        this.bullets.splice(i, 1);
+      }
     }
   }
 
   punch() {
-    const hitbox = this.add.rectangle(
-      this.player.x + this.facing * 18,
-      this.player.y,
-      24,
-      26,
-      0xffffff,
-      0.22
-    );
+    const hitbox = {
+      x: this.player.x + this.facing * 20,
+      y: this.player.y,
+      w: 26,
+      h: 26
+    };
 
-    this.physics.add.existing(hitbox);
-    hitbox.body.allowGravity = false;
+    if (this.punchFlash) this.punchFlash.destroy();
+    this.punchFlash = this.add.rectangle(hitbox.x, hitbox.y, hitbox.w, hitbox.h, 0xffffff, 0.22);
 
-    let spent = false;
-    const overlap = this.physics.add.overlap(hitbox, this.enemies, (_hitbox, enemy) => {
-      if (spent || !enemy.active) return;
-      spent = true;
-      enemy.hp -= 2;
-      enemy.setTint(0xffffff);
-      this.time.delayedCall(70, () => {
-        if (enemy.active) enemy.clearTint();
-      });
-      if (enemy.hp <= 0) enemy.destroy();
-    });
+    for (const enemy of this.enemies) {
+      if (enemy.alive && this.overlap(hitbox, enemy)) {
+        this.damageEnemy(enemy, 2);
+        break;
+      }
+    }
 
     this.time.delayedCall(90, () => {
-      overlap.destroy();
-      hitbox.destroy();
+      if (this.punchFlash) {
+        this.punchFlash.destroy();
+        this.punchFlash = null;
+      }
     });
   }
 
-  onBulletHit(bullet, enemy) {
-    bullet.destroy();
-    enemy.hp -= 1;
-    enemy.setTint(0xffffff);
+  damageEnemy(enemy, damage) {
+    enemy.hp -= damage;
+    enemy.view.setFillStyle(0xffffff);
+
     this.time.delayedCall(70, () => {
-      if (enemy.active) enemy.clearTint();
+      if (enemy.alive) enemy.view.setFillStyle(0xef476f);
     });
-    if (enemy.hp <= 0) enemy.destroy();
+
+    if (enemy.hp <= 0) {
+      enemy.alive = false;
+      enemy.view.destroy();
+    }
+  }
+
+  overlap(a, b) {
+    return Math.abs(a.x - b.x) * 2 < (a.w + b.w) &&
+           Math.abs(a.y - b.y) * 2 < (a.h + b.h);
   }
 }
 
@@ -218,13 +278,6 @@ const config = {
   render: {
     antialias: false,
     roundPixels: true
-  },
-  physics: {
-    default: 'arcade',
-    arcade: {
-      gravity: { y: 0 },
-      debug: false
-    }
   },
   scale: {
     mode: Phaser.Scale.FIT,
